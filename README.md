@@ -33,7 +33,7 @@ Home Hunter is a Python-based tool that automates the process of searching for a
    ```
 
 Check your discord channel and you should see a notification like so (the bot will be whatever your webhook is set at)
-![Discord embed example](https://github.com/zaneriley/home-hunter/example-image.png)
+![Discord embed example](https://github.com/zaneriley/home-hunter/blob/main/example-image.png?raw=true)
 
 ### How it Works
 
