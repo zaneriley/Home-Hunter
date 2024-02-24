@@ -1,5 +1,7 @@
 screenshot*.png
 page_source*.html
+seen_listings.json
+results
 .vscode
 __pycache__
 .DS_Store
@@ -8,4 +10,5 @@ __pycache__
 *.db
 *.sqlite
 venv
-seen_listings.json
+
+
