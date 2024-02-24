@@ -12,8 +12,8 @@ import shutil
 import configparser
 import requests
 import json
+import time 
 from abc import ABC, abstractmethod
-
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -222,5 +222,14 @@ class HomeHunter(WebDriverBase):
 if __name__ == "__main__":
     logger.info("Starting home-hunter")
     hunter = HomeHunter(config)
-    hunter.check_for_new_listings()
-    logger.info("Home-hunter finished")
+    
+    try:
+        while True:
+            hunter.check_for_new_listings()
+            logger.info("Waiting for 5 minutes before the next check...")
+            time.sleep(300)  # Wait for 300 seconds (5 minutes) before the next execution
+    except KeyboardInterrupt:
+        logger.info("Home-hunter terminated by user")
+    finally:
+        hunter.close_driver()
+        logger.info("Driver closed and home-hunter finished")
