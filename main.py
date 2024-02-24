@@ -61,6 +61,11 @@ class HomeHunter(WebDriverBase):
         self.seen_listings_file = "seen_listings.json"
         self.load_seen_listings()
 
+    def restart_driver(self):
+        """Close and restart the WebDriver."""
+        self.close_driver() 
+        self.driver = self._init_driver() 
+
     def load_seen_listings(self):
         try:
             with open(self.seen_listings_file, "r") as f:
@@ -225,9 +230,10 @@ if __name__ == "__main__":
     
     try:
         while True:
+            hunter.restart_driver() 
             hunter.check_for_new_listings()
             logger.info("Waiting for 5 minutes before the next check...")
-            time.sleep(300)  # Wait for 300 seconds (5 minutes) before the next execution
+            time.sleep(300)  
     except KeyboardInterrupt:
         logger.info("Home-hunter terminated by user")
     finally:
