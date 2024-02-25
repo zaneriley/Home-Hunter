@@ -1,4 +1,4 @@
-import logging
+
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.chrome.options import Options
@@ -7,42 +7,48 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
+from configparser import ConfigParser, SectionProxy
+from typing import Dict, List, Optional, Union
+from abc import ABC, abstractmethod
+
+import logging
 import os
-import shutil
 import configparser
 import requests
 import json
-import time 
-from abc import ABC, abstractmethod
+import time
+import traceback
+import importlib
 
-enable_notifications = os.getenv("ENABLE_NOTIFICATIONS", "false").lower() in ("true", "1", "t")
-notification_url = os.getenv("NOTIFICATION_URL")
-config = configparser.ConfigParser()
-config.read('config.ini')
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)  # Customize level as needed
+
+enable_notifications: bool = os.getenv("ENABLE_NOTIFICATIONS", "false").lower() in ("true", "1", "t")
+notification_url: Optional[str] = os.getenv("NOTIFICATION_URL")
+webdriver_path: str = os.getenv("WEBDRIVER_PATH", "/usr/bin/chromedriver")
+
+config = configparser.ConfigParser(interpolation=None)
+config_path = 'websites.ini'
+if config.read(config_path):
+    logger.info(f"Configuration loaded from {config_path}")
+else:
+    logger.error(f"Failed to load configuration from {config_path}. Please check the file path and try again.")
+    exit(1) 
 
 # Set up logging
 class IgnoreBrowserLogsFilter(logging.Filter):
     def filter(self, record):
         return 'Third-party cookie will be blocked' not in record.getMessage()
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)  # Customize level as needed
-
 handler = logging.StreamHandler()
 logger.addHandler(handler)
 logger.addFilter(IgnoreBrowserLogsFilter())
 
-config = {
-    "enable_notifications": False,
-    "webdriver_path": "/usr/bin/chromedriver",
-    "target_url": "https://suumo.jp/sp/tochi/tokyo/sc_113/map.html?kamax=8000&tmenmin=100&et=15&kjoken=2&sort=1&sjoken%5B0%5D=004&lt=0.6220203181688256&lg=2.4378622780639763&km=0",
-    "dynamic_content_timeout": 10,  # seconds
-    "notification_url": "",
-}
 
 class WebDriverBase:
-    def __init__(self, driver_path):
-        self.driver_path = driver_path
+    def __init__(self):
+        self.driver_path: str = webdriver_path
         self.driver = self._init_driver()
 
     def _init_driver(self):
@@ -66,14 +72,16 @@ class AbstractHunter(ABC):
     Abstract base class for website hunters.
     Defines the template methods and properties each hunter must implement.
     """
-    
-    def __init__(self, config):
+
+    def __init__(self, config: Union[SectionProxy, Dict[str, Union[str, bool, int]]]) -> None:
         """
-        Initialize the hunter with a configuration dictionary.
+        Initialize the hunter with a configuration section from configparser or a dictionary.
         """
         self.config = config
-        self.seen_listings = []
+        self.seen_listings: List[str] = []
+        self.new_listings: List[str] = [] # For notification summaries
         self.load_seen_listings()
+        
 
     def restart_driver(self):
         """Close and restart the WebDriver."""
@@ -146,7 +154,7 @@ class AbstractHunter(ABC):
             json.dump(self.seen_listings, file)
 
     # Check if a listing has already been seen
-    def is_listing_seen(self, listing_url):
+    def has_listing_been_seen(self, listing_url):
         """Check if a listing has already been seen."""
         return listing_url in self.seen_listings
 
@@ -155,17 +163,62 @@ class AbstractHunter(ABC):
         if listing_url not in self.seen_listings:
             self.seen_listings.append(listing_url)
             self.save_seen_listings()
+            # Check if it's a new listing and add it to new_listings
+            if listing_url not in self.new_listings:
+                self.new_listings.append(listing_url)
 
-    # Send a notification to Discord
+    def track_new_listing(self, listing_details):
+        """Track new listings if not already seen."""
+        if not self.has_listing_been_seen(listing_details['url']):
+            self.new_listings.append(listing_details)
+            self.mark_listing_seen(listing_details['url'])
+            logger.info("Tracking new listing: %s", listing_details['url'])
+
+    @abstractmethod
+    def format_listing_message(self, listing_details):
+        """
+        Generate a custom embed payload for a listing.
+        
+        :param listing_details: A dictionary containing details of the listing.
+        :return: A dictionary representing the embed payload.
+        """
+        pass
+
+    def announce_new_listings(self):
+        """Announce new listings based on their count."""
+        total_new_listings = len(self.new_listings)
+        logger.info("Announcing new listings, count: %d", len(self.new_listings))
+
+        if total_new_listings == 0:
+            return  # No new listings to announce
+
+        if total_new_listings < 3:
+            # Send individual notifications with custom embeds for each listing
+            for listing_details in self.new_listings:
+                embed_payload = self.format_listing_message(listing_details)
+                self.send_notification(embed_payload)
+        else:
+            # For three or more listings, prepare a summary notification
+            # and include embeds for the first three listings
+            content = f"Found {total_new_listings} new listings. Check them out here: [View Listings](YourListingsPageURL)"
+            embeds = [self.format_listing_message(listing_details) for listing_details in self.new_listings[:3]]
+            embed_payload = {"content": content, "embeds": embeds}
+            logger.info(f"Sending notification: {embed_payload}")
+            self.send_notification(embed_payload)
+
+        self.new_listings = []
+
     def send_notification(self, embed_payload):
         """
         Send a notification about a new listing.
         """
-        if self.config.get("enable_notifications", False):
-            logger.info("Testing mode is ON. Notification not sent. Payload: %s", embed_payload)
-        else:
+        enable_notifications = self.config.get("enable_notifications", False)
+        notification_url = self.config.get("notification_url", os.getenv("NOTIFICATION_URL"))
+
+        if enable_notifications and notification_url:
+            logger.info("Attempting to send notification. Payload: %s", embed_payload)
             try:
-                response = requests.post(self.config["notification_url"], json=embed_payload, timeout=10)
+                response = requests.post(notification_url, json=embed_payload, timeout=10)
                 response.raise_for_status()  # Raises an exception for 4XX/5XX errors
             except requests.exceptions.HTTPError as http_err:
                 logger.error(f"HTTP error occurred: {http_err}; Response body: {response.text}")
@@ -177,17 +230,17 @@ class AbstractHunter(ABC):
                 logger.error(f"Request exception occurred: {req_err}")
             else:
                 logger.info(f"Successfully sent notification to Discord; Status Code: {response.status_code}")
+        else:
+            pass
 
-
-class TestHunter(AbstractHunter, WebDriverBase):
-    def __init__(self, config):
-        # Initialize WebDriverBase first
-        WebDriverBase.__init__(self, config["webdriver_path"])   
-        AbstractHunter.__init__(self, config)
+class SUUMOHunter(AbstractHunter, WebDriverBase):
+    def __init__(self):
+        super().__init__(config['SUUMO'])
+        WebDriverBase.__init__(self)
 
     def check_for_new_listings(self):
+        logger.debug(f"Accessing URL: {self.config['target_url']}")
         self.driver.get(self.config["target_url"])
-        logger.info("Opened target listings page")
         self.save_screenshot('screenshot_initial_load.png')
         page_source = self.driver.page_source
         self.save_html_content(page_source, 'page_source_initial_load.html')
@@ -199,10 +252,6 @@ class TestHunter(AbstractHunter, WebDriverBase):
             zoom_out_button.click()
             logger.info("Clicked zoom out once.")
             self.save_screenshot('screenshot_zoom_out_click1.png')
-
-            zoom_out_button.click()
-            logger.info("Clicked zoom out twice.")
-            self.save_screenshot('screenshot_zoom_out_click2.png')
 
         except TimeoutException:
             logger.error("Zoom out button not found or not clickable within timeout period.")
@@ -250,16 +299,22 @@ class TestHunter(AbstractHunter, WebDriverBase):
                         "image_url": image_url
                     }
                     
-                    if not self.is_listing_seen(listing_details['url']):
+                    if not self.has_listing_been_seen(listing_details['url']):
                         embed_payload = self.format_listing_message(listing_details)
-                        self.send_notification(embed_payload)
                         self.mark_listing_seen(listing_details['url'])
+                        self.track_new_listing(listing_details)
+                        
+
                     else:
                         logger.info(f"Listing already seen: {price}")
                 except NoSuchElementException as e:
                     logger.error(f"Error extracting details for listing: {e}")
+            self.announce_new_listings()
         except TimeoutException as e:
             logger.error(f"Timeout waiting for content: {e}")
+        
+        
+
 
         finally:
             for entry in self.driver.get_log('browser'):
@@ -267,7 +322,7 @@ class TestHunter(AbstractHunter, WebDriverBase):
             self.close_driver()
             logger.info("Driver closed")
     
-    def is_listing_seen(self, listing_url):
+    def has_listing_been_seen(self, listing_url):
         # Check if a listing has already been seen
         return listing_url in self.seen_listings
     
@@ -301,9 +356,14 @@ class TestHunter(AbstractHunter, WebDriverBase):
         }
         return embed_payload
  
-
 if __name__ == "__main__":
-    ascii_logo = """
+    # ANSI color codes
+    blue_bold = '\x1b[34;1m'
+    reset = '\033[0m'
+    yellow = '\033[93m'
+    green = '\033[92m'
+    red = '\033[91m'
+    ascii_logo = blue_bold + """
 ooooo   ooooo                                       ooooo   ooooo                             .                      
 `888'   `888'                                       `888'   `888'                           .o8                      
  888     888   .ooooo.  ooo. .oo.  .oo.    .ooooo.   888     888  oooo  oooo  ooo. .oo.   .o888oo  .ooooo.  oooo d8b 
@@ -311,21 +371,38 @@ ooooo   ooooo                                       ooooo   ooooo               
  888     888  888   888  888   888   888  888ooo888  888     888   888   888   888   888    888   888ooo888  888     
  888     888  888   888  888   888   888  888    .o  888     888   888   888   888   888    888 . 888    .o  888     
 o888o   o888o `Y8bod8P' o888o o888o o888o `Y8bod8P' o888o   o888o  `V88V"V8P' o888o o888o   "888" `Y8bod8P' d888b                                                                                                                                                                                                                                                                                      
-    """
+    """ + reset
     print(ascii_logo, flush=True)
     logger.info("Starting home-hunter")
 
-    active_hunter_class = TestHunter  # Change to HomeHunter to switch back
-    hunter = active_hunter_class(config)
+    # Check if notifications are enabled and if the notification URL is provided
+    enable_notifications = os.getenv("ENABLE_NOTIFICATIONS", "false").lower() in ("true", "1", "t")
+    notification_url = os.getenv("NOTIFICATION_URL")
+    if not enable_notifications or not notification_url:
+        # Notification disabled message
+        alert_message = f"""{yellow}
+            ⚠️  Attention: Notifications are disabled or notification URL is not provided. ⚠️
+            ⚠️                      Notifications will NOT be sent.                        ⚠️
+                        {reset}"""
+        print(alert_message, flush=True)
     
+    hunter = SUUMOHunter()
+
     try:
         while True:
             hunter.restart_driver() 
             hunter.check_for_new_listings()
             logger.info("Waiting for 5 minutes before the next check...")
             time.sleep(300)  
+
+    except Exception as e:
+        error_message = f"{red}❗ Error processing SUUMOHunter: {e}{reset}"
+        print(error_message, flush=True)
+        traceback.print_exc()
     except KeyboardInterrupt:
-        logger.info("Home-hunter terminated by user")
+        user_termination_message = f"{yellow}🛑 Home-hunter terminated by user.{reset}"
+        print(user_termination_message, flush=True)
     finally:
         hunter.close_driver()
-        logger.info("Driver closed and home-hunter finished")
+        completion_message = f"{green}✅ Home-hunter finished.{reset}"
+        print(completion_message, flush=True)
