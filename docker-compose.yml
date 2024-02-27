@@ -7,5 +7,5 @@ services:
       - ./:/app
     environment:
       WEBDRIVER_PATH: /usr/bin/chromedriver
-      ENABLE_NOTIFICATIONS: "true"
+      ENABLE_NOTIFICATIONS: "false"
       NOTIFICATION_URL: ${DISCORD_WEBHOOK_URL}
