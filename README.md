@@ -1,3 +1,6 @@
+
+<img src="https://github.com/zaneriley/home-hunter/blob/main/logo.png?raw=true" alt="Home Hunter logo" width="500">
+
 ## Home Hunter
 
 Home Hunter is a Python-based tool that automates the process of searching for and monitoring new home listings on the popular Japanese real estate website, SUUMO. It leverages Selenium for web scraping, Discord for notifications, and offers these core features:
@@ -33,7 +36,9 @@ Home Hunter is a Python-based tool that automates the process of searching for a
    ```
 
 Check your discord channel and you should see a notification like so (the bot will be whatever your webhook is set at)
-![Discord embed example](https://github.com/zaneriley/home-hunter/blob/main/example-image.png?raw=true)
+
+<img src="https://github.com/zaneriley/home-hunter/blob/main/example-image.png?raw=true" alt="Discord embed example" width="300">
+
 
 ### How it Works
 

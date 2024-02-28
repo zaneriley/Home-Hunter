@@ -1,3 +1,5 @@
 selenium>=4.0.0
 requests==2.31.0
 discord-webhook==0.16.0
+ruff
+pre-commit
