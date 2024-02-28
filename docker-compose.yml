@@ -9,4 +9,5 @@ services:
       WEBDRIVER_PATH: /usr/bin/chromedriver
       ENABLE_NOTIFICATIONS: "true"
       NOTIFICATION_URL: ${DISCORD_WEBHOOK_URL}
+      DISCORD_ROLE_ID: ${DISCORD_ROLE} # Looks like 123456789012345
       LOG_LEVEL: INFO

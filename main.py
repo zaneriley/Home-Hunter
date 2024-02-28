@@ -38,6 +38,7 @@ enable_notifications: bool = os.getenv("ENABLE_NOTIFICATIONS", "false").lower() 
 )
 notification_url: Optional[str] = os.getenv("NOTIFICATION_URL")
 webdriver_path: str = os.getenv("WEBDRIVER_PATH", "/usr/bin/chromedriver")
+role_id = os.getenv("DISCORD_ROLE_ID")
 
 config = configparser.ConfigParser(interpolation=None)
 config_path = "websites.ini"
@@ -256,15 +257,37 @@ class AbstractHunter(ABC):
 
         self.listings["new_listings"] = []
 
-    @abstractmethod
     def format_listing_message(self, listing_details):
-        """
-        Generate a custom embed payload for a listing.
+        try:
+            embed_payload = {
+                        "title": listing_details.get("price"),
+                        "description": listing_details.get("size"),
+                        "url": listing_details.get("url"),
+                        "color": 4937567,
+                        "fields": [
+                            {
+                                "name": "Address",
+                                "value": listing_details.get("address"),
+                                "inline": True,
+                            },
+                            {
+                                "name": "Access",
+                                "value": listing_details.get("access"),
+                                "inline": True,
+                            },
+                        ],
+                        "author": {
+                            "name": "SUUMO",
+                            "url": listing_details.get("url"),
+                            "icon_url": "https://cdn3.emoji.gg/emojis/9666-link.png",
+                        },
+                        "image": {"url": listing_details.get("image_url")},
+                    }
 
-        :param listing_details: A dictionary containing details of the listing.
-        :return: A dictionary representing the embed payload.
-        """
-        pass
+            return embed_payload
+        except KeyError as e:
+            logger.error("Missing key in listing details: %s", e) 
+            return None 
 
     def announce_new_listings(self):
         """Announce new listings based on their count."""
@@ -276,11 +299,12 @@ class AbstractHunter(ABC):
         if new_listings_count < 3:
             for listing in self.listings["new_listings"]:
                 logger.info("Preparing message for %s", listing["url"])
-                self.send_notification(self.format_listing_message(listing))
+                embed_payload = self.format_listing_message(listing)
+                self.send_notification({"content": "", "embeds": embed_payload})
         else:
             logger.info(
                 "Preparing summary for %d listings", len(self.listings["new_listings"])
-            )
+            ) 
             self.send_summary_notification(self.listings["new_listings"])
 
         self.listings["new_listings"] = []
@@ -289,7 +313,7 @@ class AbstractHunter(ABC):
         """Send a notification with the given payload."""
         if enable_notifications and notification_url:
             try:
-                logger.info(f"Payload to send notification: {embed_payload}")
+                logger.info(f"Payload to send notification:\n{json.dumps(embed_payload, indent=4)}") 
                 response = requests.post(notification_url, json=embed_payload)
                 response.raise_for_status()  # Raise an exception if a non-200 status code is returned
                 logger.info("Notification sent successfully.")
@@ -309,8 +333,11 @@ class AbstractHunter(ABC):
 
     def send_summary_notification(self, listings):
         """Send a summary notification for multiple listings."""
+
         target_url = self.config["target_url"]
         content = f"Found {len(listings)} new listings. View on [SUUMO]({target_url})"
+        if role_id:
+            content = f"<@&{role_id}> " + content
         embeds = [self.format_listing_message(listing) for listing in listings[:3]]
         self.send_notification({"content": content, "embeds": embeds})
 
@@ -413,38 +440,6 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
                 logger.info(entry)
             self.close_driver()
             logger.info("Driver closed")
-
-    def format_listing_message(self, listing_details):
-        embed_payload = {
-            "content": None,
-            "embeds": [
-                {
-                    "title": listing_details["price"],
-                    "description": listing_details["size"],
-                    "url": listing_details["url"],
-                    "color": 4937567,
-                    "fields": [
-                        {
-                            "name": "Address",
-                            "value": listing_details["address"],
-                            "inline": True,
-                        },
-                        {
-                            "name": "Access",
-                            "value": listing_details["access"],
-                            "inline": True,
-                        },
-                    ],
-                    "author": {
-                        "name": "SUUMO",
-                        "url": listing_details["url"],
-                        "icon_url": "https://cdn3.emoji.gg/emojis/9666-link.png",
-                    },
-                    "image": {"url": listing_details["image_url"]},
-                }
-            ],
-        }
-        return embed_payload
 
 if __name__ == "__main__":
 
