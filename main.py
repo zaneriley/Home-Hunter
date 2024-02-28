@@ -175,18 +175,28 @@ class AbstractHunter(ABC):
 
     def save_seen_listings(self):
         try:
-            if self.listings["seen_listings"]:
-                first_url, first_listing_details = next(
-                    iter(self.listings["seen_listings"].items())
-                )
-                pretty_first_listing = json.dumps(
-                    {first_url: first_listing_details}, indent=4
-                )
+            # Load existing seen listings from file
+            existing_seen_listings = {}
+            try:
+                with open(self.seen_listings_file, "r") as file:
+                    existing_seen_listings = json.load(file)
+            except FileNotFoundError:
+                logger.info("Seen listings file not found. Creating a new one.")
+            except json.JSONDecodeError:
+                logger.error("Error decoding the seen listings file. Starting with an empty set.")
+
+            # Update existing seen listings with new ones
+            updated_seen_listings = {**existing_seen_listings, **self.listings["seen_listings"]}
+
+            if updated_seen_listings:
+                first_url, first_listing_details = next(iter(updated_seen_listings.items()))
+                pretty_first_listing = json.dumps({first_url: first_listing_details}, indent=4)
                 logger.debug(f"First seen listing to be saved: {pretty_first_listing}")
             else:
                 logger.debug("No listings to save.")
 
-            pretty_listings = json.dumps(self.listings["seen_listings"], indent=4)
+            # Save updated seen listings back to file
+            pretty_listings = json.dumps(updated_seen_listings, indent=4)
             with open(self.seen_listings_file, "w") as file:
                 file.write(pretty_listings)
 
@@ -239,6 +249,11 @@ class AbstractHunter(ABC):
         if new_listings_count == 0:
             logger.info("No new listings found, skipping notification.")
 
+        if self.listings["new_listings"]:
+            self.announce_new_listings()
+
+        self.save_seen_listings()
+
         self.listings["new_listings"] = []
 
     @abstractmethod
@@ -266,29 +281,37 @@ class AbstractHunter(ABC):
             logger.info(
                 "Preparing summary for %d listings", len(self.listings["new_listings"])
             )
-            self.send_summary_notification(self.listings["new_listings"][:3])
+            self.send_summary_notification(self.listings["new_listings"])
 
         self.listings["new_listings"] = []
 
     def send_notification(self, embed_payload):
         """Send a notification with the given payload."""
-        if self.config.get("enable_notifications", False):
-            response = requests.post(
-                self.config["notification_url"], json=embed_payload
-            )
-            if response.status_code == 200:
+        if enable_notifications and notification_url:
+            try:
+                logger.info(f"Payload to send notification: {embed_payload}")
+                response = requests.post(notification_url, json=embed_payload)
+                response.raise_for_status()  # Raise an exception if a non-200 status code is returned
                 logger.info("Notification sent successfully.")
-            else:
-                logger.error("Failed to send notification.")
+            except requests.exceptions.HTTPError as e:
+                logger.error("Failed to send notification: %s", e)
+            except requests.exceptions.ConnectionError as e:
+                logger.error("Failed to send notification: %s", e)
+            except requests.exceptions.Timeout as e:
+                logger.error("Failed to send notification: %s", e)
+            except requests.exceptions.RequestException as e:
+                logger.error("Failed to send notification: %s", e)
+
         else:
-            logger.info("Notifications are disabled, skipping notification.")
+            logger.info("Notifications are disabled, or notification URL is not provided, skipping notification.")
             logger.info("Would have sent notification: %s", embed_payload)
-            logger.info("⚠️  Edit the docker-compose file to enable notifications.  ⚠️ ")
+            logger.info("⚠️  Edit the environment variables to enable notifications.  ⚠️ ")
 
     def send_summary_notification(self, listings):
         """Send a summary notification for multiple listings."""
-        content = f"Found {len(listings)} new listings. Check them out here: [View Listings](YourListingsPageURL)"
-        embeds = [self.format_listing_message(listing) for listing in listings]
+        target_url = self.config["target_url"]
+        content = f"Found {len(listings)} new listings. View on [SUUMO]({target_url})"
+        embeds = [self.format_listing_message(listing) for listing in listings[:3]]
         self.send_notification({"content": content, "embeds": embeds})
 
 class SUUMOHunter(AbstractHunter, WebDriverBase):
