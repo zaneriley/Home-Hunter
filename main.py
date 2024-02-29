@@ -3,7 +3,7 @@ from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 from configparser import SectionProxy
@@ -353,6 +353,7 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
         page_source = self.driver.page_source
         self.save_html_content(page_source, "page_source_initial_load.html")
 
+        # Zoom out of the map to get more results
         try:
             zoom_out_button = WebDriverWait(
                 self.driver, self.config["dynamic_content_timeout"]
@@ -370,6 +371,7 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
                 "Zoom out button not found or not clickable within timeout period."
             )
 
+        # Switch the list view, rather than map view
         try:
             WebDriverWait(self.driver, self.config["dynamic_content_timeout"]).until(
                 EC.element_to_be_clickable((By.ID, "listViewButton"))
@@ -391,8 +393,21 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
             self.save_html_content(
                 self.driver.page_source, "page_source_after_button_click.html"
             )
-
+    
             logger.info("Dynamic content loaded")
+
+            # Wait for the dropdown menu to be clickable and select "New arrival order"
+            try:
+                WebDriverWait(self.driver, self.config["dynamic_content_timeout"]).until(
+                    EC.element_to_be_clickable((By.ID, "listSort"))
+                )
+                select = Select(self.driver.find_element(By.ID, "listSort"))
+                select.select_by_value("11")  # Selecting "New arrival order"
+                logger.info("Sorting listings by newest.")
+                self.save_screenshot("screenshot_after_selecting_new_arrival_order.png")
+
+            except TimeoutException:
+                logger.error("Dropdown menu not found or not interactable within timeout period.")
 
             all_listings = []
 
