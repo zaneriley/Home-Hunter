@@ -11,3 +11,4 @@ services:
       NOTIFICATION_URL: ${DISCORD_WEBHOOK_URL}
       DISCORD_ROLE_ID: ${DISCORD_ROLE} # Looks like 123456789012345
       LOG_LEVEL: INFO
+    restart: always

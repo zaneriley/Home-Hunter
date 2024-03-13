@@ -404,6 +404,7 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
                 select = Select(self.driver.find_element(By.ID, "listSort"))
                 select.select_by_value("11")  # Selecting "New arrival order"
                 logger.info("Sorting listings by newest")
+                
                 self.save_screenshot("screenshot_after_selecting_new_arrival_order.png")
 
             except TimeoutException:

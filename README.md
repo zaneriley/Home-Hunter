@@ -3,11 +3,7 @@
 
 ## Home Hunter
 
-Home Hunter is a Python-based tool that automates the process of searching for and monitoring new home listings on the popular Japanese real estate website, SUUMO. It leverages Selenium for web scraping, Discord for notifications, and offers these core features:
-
-* **Targeted Search:** Efficiently search for homes on SUUMO based on your specific criteria.
-* **Real-time Notifications:** Receive immediate Discord alerts when new listings match your search parameters.
-* **Duplicate Filtering:** Avoid redundant notifications by tracking previously seen listings.
+Home Hunter is a Python-based tool that automates the process of searching for and monitoring new home listings on the popular Japanese real estate website, SUUMO. It leverages Selenium for web scraping and Discord for notifications.
 
 **Prerequisites**
 
@@ -19,18 +15,28 @@ Home Hunter is a Python-based tool that automates the process of searching for a
 
 **Installation and Configuration**
 
-1. **Clone the repository:**
+1. **Install Docker and Docker Compose:** Follow the official installation instructions for your operating system:
+  * **Docker:** https://docs.docker.com/get-docker/
+  * **Docker Compose:** https://docs.docker.com/compose/install/
+
+2. **Clone the repository:**
    ```bash
    git clone [https://github.com/your-username/home-hunter.git](https://github.com/your-username/home-hunter.git)
    cd home-hunter
     ```
-2. **Set up environment variables:**
+    Configure Environment Variables:
+3. **Add your SUUMO url in `websites.ini`**
+    ```bash
+    [SUUMO]
+    target_url = https://suumo.jp/
+    ```
+4. **Set up environment variables**
    ```bash
     WEBDRIVER_PATH: The absolute path to your ChromeDriver executable.
     NOTIFICATION_URL: Your Discord webhook URL.
-    TARGET_URL: The specific SUUMO URL for your desired search area.
+    DISCORD_ROLE_ID=Your Discord role ID for notifications
     ```
-3. **Run the docker container:**
+5. **Run the docker container:**
    ```bash
    docker-compose up --build
    ```
