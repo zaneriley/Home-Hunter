@@ -50,13 +50,16 @@ else:
     )
     exit(1)
 
+
 class IgnoreBrowserLogsFilter(logging.Filter):
     def filter(self, record):
         return "Third-party cookie will be blocked" not in record.getMessage()
 
+
 handler = logging.StreamHandler()
 logger.addHandler(handler)
 logger.addFilter(IgnoreBrowserLogsFilter())
+
 
 class WebDriverBase:
     def __init__(self):
@@ -70,7 +73,7 @@ class WebDriverBase:
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920x1080")
-        chrome_options.add_argument("--log-level=off")  
+        chrome_options.add_argument("--log-level=off")
         service = ChromeService(executable_path=self.driver_path)
         driver = webdriver.Chrome(service=service, options=chrome_options)
 
@@ -78,6 +81,7 @@ class WebDriverBase:
 
     def close_driver(self):
         self.driver.quit()
+
 
 class AbstractHunter(ABC):
     """
@@ -93,8 +97,8 @@ class AbstractHunter(ABC):
         """
         self.config = config
         self.listings = {
-            "seen_listings": {},  
-            "new_listings": [],  
+            "seen_listings": {},
+            "new_listings": [],
         }
         self.load_seen_listings()
 
@@ -184,14 +188,23 @@ class AbstractHunter(ABC):
             except FileNotFoundError:
                 logger.info("Seen listings file not found. Creating a new one.")
             except json.JSONDecodeError:
-                logger.error("Error decoding the seen listings file. Starting with an empty set.")
+                logger.error(
+                    "Error decoding the seen listings file. Starting with an empty set."
+                )
 
             # Update existing seen listings with new ones
-            updated_seen_listings = {**existing_seen_listings, **self.listings["seen_listings"]}
+            updated_seen_listings = {
+                **existing_seen_listings,
+                **self.listings["seen_listings"],
+            }
 
             if updated_seen_listings:
-                first_url, first_listing_details = next(iter(updated_seen_listings.items()))
-                pretty_first_listing = json.dumps({first_url: first_listing_details}, indent=4)
+                first_url, first_listing_details = next(
+                    iter(updated_seen_listings.items())
+                )
+                pretty_first_listing = json.dumps(
+                    {first_url: first_listing_details}, indent=4
+                )
                 logger.debug(f"First seen listing to be saved: {pretty_first_listing}")
             else:
                 logger.debug("No listings to save.")
@@ -209,7 +222,7 @@ class AbstractHunter(ABC):
 
     def process_listings(self, scraped_listings):
         """Process a batch of scraped listings."""
-        if not scraped_listings:  
+        if not scraped_listings:
             print("No listings to process.", flush=True)
             logger.info("No listings to process.")
             return
@@ -254,40 +267,41 @@ class AbstractHunter(ABC):
             self.announce_new_listings()
 
         self.save_seen_listings()
+        self.load_seen_listings()
 
         self.listings["new_listings"] = []
 
     def format_listing_message(self, listing_details):
         try:
             embed_payload = {
-                        "title": listing_details.get("price"),
-                        "description": listing_details.get("size"),
-                        "url": listing_details.get("url"),
-                        "color": 4937567,
-                        "fields": [
-                            {
-                                "name": "Address",
-                                "value": listing_details.get("address"),
-                                "inline": True,
-                            },
-                            {
-                                "name": "Access",
-                                "value": listing_details.get("access"),
-                                "inline": True,
-                            },
-                        ],
-                        "author": {
-                            "name": "SUUMO",
-                            "url": listing_details.get("url"),
-                            "icon_url": "https://cdn3.emoji.gg/emojis/9666-link.png",
-                        },
-                        "image": {"url": listing_details.get("image_url")},
-                    }
+                "title": listing_details.get("price"),
+                "description": listing_details.get("size"),
+                "url": listing_details.get("url"),
+                "color": 4937567,
+                "fields": [
+                    {
+                        "name": "Address",
+                        "value": listing_details.get("address"),
+                        "inline": True,
+                    },
+                    {
+                        "name": "Access",
+                        "value": listing_details.get("access"),
+                        "inline": True,
+                    },
+                ],
+                "author": {
+                    "name": "SUUMO",
+                    "url": listing_details.get("url"),
+                    "icon_url": "https://cdn3.emoji.gg/emojis/9666-link.png",
+                },
+                "image": {"url": listing_details.get("image_url")},
+            }
 
             return embed_payload
         except KeyError as e:
-            logger.error("Missing key in listing details: %s", e) 
-            return None 
+            logger.error("Missing key in listing details: %s", e)
+            return None
 
     def announce_new_listings(self):
         """Announce new listings based on their count."""
@@ -304,7 +318,7 @@ class AbstractHunter(ABC):
         else:
             logger.info(
                 "Preparing summary for %d listings", len(self.listings["new_listings"])
-            ) 
+            )
             self.send_summary_notification(self.listings["new_listings"])
 
         self.listings["new_listings"] = []
@@ -313,7 +327,9 @@ class AbstractHunter(ABC):
         """Send a notification with the given payload."""
         if enable_notifications and notification_url:
             try:
-                logger.info(f"Payload to send notification:\n{json.dumps(embed_payload, indent=4)}") 
+                logger.info(
+                    f"Payload to send notification:\n{json.dumps(embed_payload, indent=4)}"
+                )
                 response = requests.post(notification_url, json=embed_payload)
                 response.raise_for_status()  # Raise an exception if a non-200 status code is returned
                 logger.info("Notification sent successfully.")
@@ -327,9 +343,13 @@ class AbstractHunter(ABC):
                 logger.error("Failed to send notification: %s", e)
 
         else:
-            logger.info("Notifications are disabled, or notification URL is not provided, skipping notification.")
+            logger.info(
+                "Notifications are disabled, or notification URL is not provided, skipping notification."
+            )
             logger.info("Would have sent notification: %s", embed_payload)
-            logger.info("⚠️  Edit the environment variables to enable notifications.  ⚠️ ")
+            logger.info(
+                "⚠️  Edit the environment variables to enable notifications.  ⚠️ "
+            )
 
     def send_summary_notification(self, listings):
         """Send a summary notification for multiple listings."""
@@ -340,6 +360,7 @@ class AbstractHunter(ABC):
             content = f"<@&{role_id}> " + content
         embeds = [self.format_listing_message(listing) for listing in listings[:3]]
         self.send_notification({"content": content, "embeds": embeds})
+
 
 class SUUMOHunter(AbstractHunter, WebDriverBase):
     def __init__(self):
@@ -393,22 +414,24 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
             self.save_html_content(
                 self.driver.page_source, "page_source_after_button_click.html"
             )
-    
+
             logger.info("Dynamic content loaded")
 
             # Wait for the dropdown menu to be clickable and select "New arrival order"
             try:
-                WebDriverWait(self.driver, self.config["dynamic_content_timeout"]).until(
-                    EC.element_to_be_clickable((By.ID, "listSort"))
-                )
+                WebDriverWait(
+                    self.driver, self.config["dynamic_content_timeout"]
+                ).until(EC.element_to_be_clickable((By.ID, "listSort")))
                 select = Select(self.driver.find_element(By.ID, "listSort"))
                 select.select_by_value("11")  # Selecting "New arrival order"
                 logger.info("Sorting listings by newest")
-                
+
                 self.save_screenshot("screenshot_after_selecting_new_arrival_order.png")
 
             except TimeoutException:
-                logger.error("Dropdown menu not found or not interactable within timeout period.")
+                logger.error(
+                    "Dropdown menu not found or not interactable within timeout period."
+                )
 
             all_listings = []
 
@@ -441,8 +464,15 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
                     all_listings.append(listing_details)
 
                 except NoSuchElementException as e:
-
                     logger.error(f"Error extracting details for listing: {e}")
+
+            # Open the URL from each listing
+            # Find the table[summary="hyo"]
+            # Look for the text "建ぺい率･容積率" and get the second th+td pair
+            # Find second number
+            # Do original land size * second number / 100
+            # If this above number is larger than 140, it is a good listing
+            
 
             self.process_listings(all_listings)
 
@@ -457,8 +487,8 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
             self.close_driver()
             logger.info("Driver closed")
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     blue_bold = "\x1b[34;1m"
     reset = "\033[0m"
     yellow = "\033[93m"
@@ -487,7 +517,6 @@ o888o   o888o`Y8bod8P o888o o888o o888o`Y8bod8P'o888o   o888o `V88V"V8P'o888o o8
     )
     notification_url = os.getenv("NOTIFICATION_URL")
     if not enable_notifications or not notification_url:
-
         alert_message = f"""{yellow}
             ⚠️  Attention: Notifications are disabled or notification URL is not provided. ⚠️
                                    Notifications will NOT be sent.                        
@@ -500,8 +529,8 @@ o888o   o888o`Y8bod8P o888o o888o o888o`Y8bod8P'o888o   o888o `V88V"V8P'o888o o8
         while True:
             hunter.restart_driver()
             hunter.check_for_new_listings()
-            logger.info("Waiting for 5 minutes before the next check...")
-            time.sleep(300)
+            logger.info("Waiting for 1 minute before the next check...")
+            time.sleep(60)
 
     except Exception as e:
         error_message = f"{red}❗ Error processing SUUMOHunter: {e}{reset}"
