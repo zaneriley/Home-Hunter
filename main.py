@@ -1,5 +1,5 @@
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
@@ -478,8 +478,10 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
 
             self.announce_new_listings()
 
-        except TimeoutException as e:
-            logger.error(f"Timeout waiting for content: {e}")
+        except StaleElementReferenceException as e:
+            logger.error(f"StaleElementReferenceException: {e}")
+            self.restart_driver()
+            self.check_for_new_listings()
 
         finally:
             for entry in self.driver.get_log("browser"):
@@ -523,23 +525,27 @@ o888o   o888o`Y8bod8P o888o o888o o888o`Y8bod8P'o888o   o888o `V88V"V8P'o888o o8
                         {reset}"""
         print(alert_message, flush=True)
 
+
     hunter = SUUMOHunter()
 
-    try:
-        while True:
+    while True:
+        try:
             hunter.restart_driver()
             hunter.check_for_new_listings()
-            logger.info("Waiting for 1 minute before the next check...")
-            time.sleep(60)
+            hunter.close_driver()
+            sleep_time = int(os.getenv("WAIT_SECONDS_BETWEEN_CHECKS", "60"))
+            logger.info(f"Waiting for {sleep_time} seconds before the next check...")
+            time.sleep(sleep_time)
 
-    except Exception as e:
-        error_message = f"{red}❗ Error processing SUUMOHunter: {e}{reset}"
-        print(error_message, flush=True)
-        traceback.print_exc()
-    except KeyboardInterrupt:
-        user_termination_message = f"{yellow}🛑 Home-hunter terminated by user.{reset}"
-        print(user_termination_message, flush=True)
-    finally:
-        hunter.close_driver()
-        completion_message = f"{green}✅ Home-hunter finished.{reset}"
-        print(completion_message, flush=True)
+        except Exception as e:
+            logger.error(f"❗ Error processing SUUMOHunter: {e}", exc_info=True)
+            hunter.close_driver()
+            sleep_time = int(os.getenv("WAIT_SECONDS_BETWEEN_CHECKS", "60"))
+            logger.info(f"Restarting after error. Waiting for {sleep_time} seconds before the next check...")
+            time.sleep(sleep_time)
+            # No need to restart the driver here, it will be restarted at the beginning of the next loop iteration
+
+        except KeyboardInterrupt:
+            logger.warning("🛑 Home-hunter terminated by user.")
+            hunter.close_driver()
+            break  # Exit the loop gracefully
