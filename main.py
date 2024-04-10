@@ -1,11 +1,13 @@
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException
+from selenium.common.exceptions import (
+    NoSuchElementException,
+    StaleElementReferenceException,
+)
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait, Select
+from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
 from configparser import SectionProxy
 from typing import Dict, Union
 from abc import ABC, abstractmethod
@@ -13,43 +15,55 @@ from abc import ABC, abstractmethod
 import logging
 import os
 import configparser
+import re
 import requests
 import json
 import time
+import signal
+import sys
+
 
 def setup_logging():
     log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
     numeric_level = getattr(logging, log_level, None)
     if not isinstance(numeric_level, int):
         raise ValueError(f"Invalid log level: {log_level}")
-    logging.basicConfig(level=numeric_level, format='%(message)s')
+    logging.basicConfig(level=numeric_level, format="%(message)s")
 
-    return logging.getLogger(__name__) 
+    return logging.getLogger(__name__)
 
-# This is just to clear out logs from the sites we're connecting to
+
+# This is just to clear out irrelevant logs from thewebsites themselves
 class IgnoreBrowserLogsFilter(logging.Filter):
     def filter(self, record):
         unwanted_phrases = [
             "Third-party cookie will be blocked",
             "Google Maps JavaScript API has been loaded",
             "google.maps.event.addDomListener() is deprecated",
-            "An iframe which has both allow-scripts and allow-same-origin" 
+            "An iframe which has both allow-scripts and allow-same-origin",
+            "A parser-blocking, cross site",
         ]
         return not any(phrase in record.getMessage() for phrase in unwanted_phrases)
+
 
 logger = setup_logging()
 logger.addFilter(IgnoreBrowserLogsFilter())  # Add the filter
 
+
 def load_config(config_path: str = "websites.ini") -> configparser.ConfigParser:
     config = configparser.ConfigParser(interpolation=None)
     if not config.read(config_path):
-        raise FileNotFoundError(f"Failed to load configuration from {config_path}. Please check the file path and try again.")
+        raise FileNotFoundError(
+            f"Failed to load configuration from {config_path}. Please check the file path and try again."
+        )
     return config
 
 
 class AppConfig:
     def __init__(self):
-        self.enable_notifications = os.getenv("ENABLE_NOTIFICATIONS", "false").lower() in ("true", "1", "t")
+        self.enable_notifications = os.getenv(
+            "ENABLE_NOTIFICATIONS", "false"
+        ).lower() in ("true", "1", "t")
         self.notification_url = os.getenv("NOTIFICATION_URL")
         self.webdriver_path = os.getenv("WEBDRIVER_PATH", "/usr/bin/chromedriver")
         self.role_id = os.getenv("DISCORD_ROLE_ID")
@@ -179,7 +193,7 @@ class AbstractHunter(ABC):
             # Load existing seen listings from file
             existing_seen_listings = {}
             try:
-                with open(self.seen_listings_file, "r") as file:
+                with open(self.seen_listings_file, "r", encoding="utf-8") as file:
                     existing_seen_listings = json.load(file)
             except FileNotFoundError:
                 logger.info("Seen listings file not found. Creating a new one.")
@@ -199,14 +213,14 @@ class AbstractHunter(ABC):
                     iter(updated_seen_listings.items())
                 )
                 pretty_first_listing = json.dumps(
-                    {first_url: first_listing_details}, indent=4
+                    {first_url: first_listing_details}, indent=4, ensure_ascii=False
                 )
                 logger.debug(f"First seen listing to be saved: {pretty_first_listing}")
             else:
                 logger.debug("No listings to save.")
 
             # Save updated seen listings back to file
-            pretty_listings = json.dumps(updated_seen_listings, indent=4)
+            pretty_listings = json.dumps(updated_seen_listings, indent=4, ensure_ascii=False)
             with open(self.seen_listings_file, "w") as file:
                 file.write(pretty_listings)
 
@@ -269,20 +283,19 @@ class AbstractHunter(ABC):
 
     def format_listing_message(self, listing_details):
         try:
+            description = f"""
+            **Size:** {listing_details.get('size')}\n**Price per tsubo:** {listing_details.get('price_per_tsubo')}\n**Building coverage ratio:** {listing_details.get('building_coverage_ratio')}\n**Floor area ratio:** {listing_details.get('floor_area_ratio')}\n**Features:** {listing_details.get('features')} 
+            """
+
             embed_payload = {
                 "title": listing_details.get("price"),
-                "description": listing_details.get("size"),
+                "description": description,
                 "url": listing_details.get("url"),
                 "color": 4937567,
                 "fields": [
                     {
-                        "name": "Address",
-                        "value": listing_details.get("address"),
-                        "inline": True,
-                    },
-                    {
                         "name": "Access",
-                        "value": listing_details.get("access"),
+                        "value": listing_details.get("transportation", "Not Available"),
                         "inline": True,
                     },
                 ],
@@ -321,12 +334,12 @@ class AbstractHunter(ABC):
 
     def send_notification(self, embed_payload):
         """Send a notification with the given payload."""
-        if enable_notifications and notification_url:
+        if self.app_config.enable_notifications and self.app_config.notification_url:
             try:
                 logger.info(
                     f"Payload to send notification:\n{json.dumps(embed_payload, indent=4)}"
                 )
-                response = requests.post(notification_url, json=embed_payload)
+                response = requests.post(self.app_config.notification_url, json=embed_payload)
                 response.raise_for_status()  # Raise an exception if a non-200 status code is returned
                 logger.info("Notification sent successfully.")
             except requests.exceptions.HTTPError as e:
@@ -352,15 +365,15 @@ class AbstractHunter(ABC):
 
         target_url = self.config["target_url"]
         content = f"Found {len(listings)} new listings. View on [SUUMO]({target_url})"
-        if role_id:
-            content = f"<@&{role_id}> " + content
+        if self.app_config.role_id:
+            content = f"<@&{self.app_config.role_id}> " + content
         embeds = [self.format_listing_message(listing) for listing in listings[:3]]
         self.send_notification({"content": content, "embeds": embeds})
 
 
 class SUUMOHunter(AbstractHunter, WebDriverBase):
     def __init__(self, app_config: AppConfig):
-        suumo_config = app_config.config['SUUMO']
+        suumo_config = app_config.config["SUUMO"]
         AbstractHunter.__init__(self, config=suumo_config)
         WebDriverBase.__init__(self, app_config=app_config)
 
@@ -371,91 +384,115 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
         page_source = self.driver.page_source
         self.save_html_content(page_source, "page_source_initial_load.html")
 
-        # Zoom out of the map to get more results
+        logger.info("Waiting for listings to load...")
+        element_present = EC.presence_of_element_located(
+            (By.CSS_SELECTOR, "#right_sliderList2")
+        )
+        WebDriverWait(self.driver, self.config["dynamic_content_timeout"]).until(
+            element_present
+        )
+
         try:
-            zoom_out_button = WebDriverWait(
-                self.driver, self.config["dynamic_content_timeout"]
-            ).until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, "//button[@aria-label='Zoom out']")
-                )
-            )
-            zoom_out_button.click()
-            logger.info("Clicked zoom out once.")
-            self.save_screenshot("screenshot_zoom_out_click1.png")
-
-        except TimeoutException:
-            logger.error(
-                "Zoom out button not found or not clickable within timeout period."
-            )
-
-        # Switch the list view, rather than map view
-        try:
-            WebDriverWait(self.driver, self.config["dynamic_content_timeout"]).until(
-                EC.element_to_be_clickable((By.ID, "listViewButton"))
-            )
-            logger.info("List view button is clickable.")
-
-            list_view_button = self.driver.find_element(By.ID, "listViewButton")
-            ActionChains(self.driver).click(list_view_button).perform()
-            logger.info("Clicked on list view button.")
-
-            WebDriverWait(self.driver, self.config["dynamic_content_timeout"]).until(
-                lambda d: len(
-                    d.find_elements(By.CSS_SELECTOR, "ul.listView.bukkenList > li")
-                )
-                > 0
-            )
-            logger.info("Listings have successfully loaded.")
-            self.save_screenshot("screenshot_after_button_click.png")
-            self.save_html_content(
-                self.driver.page_source, "page_source_after_button_click.html"
-            )
-
-            logger.info("Dynamic content loaded")
-
-            # Wait for the dropdown menu to be clickable and select "New arrival order"
-            try:
-                WebDriverWait(
-                    self.driver, self.config["dynamic_content_timeout"]
-                ).until(EC.element_to_be_clickable((By.ID, "listSort")))
-                select = Select(self.driver.find_element(By.ID, "listSort"))
-                select.select_by_value("11")  # Selecting "New arrival order"
-                logger.info("Sorting listings by newest")
-
-                self.save_screenshot("screenshot_after_selecting_new_arrival_order.png")
-
-            except TimeoutException:
-                logger.error(
-                    "Dropdown menu not found or not interactable within timeout period."
-                )
-
             all_listings = []
-
             listings = self.driver.find_elements(
-                By.CSS_SELECTOR, "ul.listView.bukkenList > li"
+                By.CSS_SELECTOR,
+                "#right_sliderList2  li[id^='jsiRightSliderListChild_']",
             )
-
+            logger.info(f"Found {len(listings)} listings", extra={"listings": listings})
             for listing in listings:
                 try:
-                    price = listing.find_element(By.CSS_SELECTOR, ".price").text
-                    size = listing.find_element(By.CSS_SELECTOR, ".exclusive").text
-                    address = listing.find_element(By.CSS_SELECTOR, ".address").text
-                    access = listing.find_element(By.CSS_SELECTOR, ".ensen").text
-                    url = listing.find_element(
-                        By.CSS_SELECTOR, ".innerInfo a"
+                    property_name = listing.find_element(By.CSS_SELECTOR, "p a").text
+                    property_features_elements = listing.find_elements(By.CSS_SELECTOR, "ul.cf li")
+                    property_features = "\n".join(element.text for element in property_features_elements)
+
+                    # Price and per_tsubo price
+                    price_elements = listing.find_elements(By.XPATH, ".//div[@class='fr w105 bw']/p[contains(text(), '円')]")
+                    
+                    price = "Not found"
+                    price_per_tsubo = "Not found"
+
+                    for elem in price_elements:
+                        text = elem.text
+                        # Check for total price
+                        if "万円" in text and price == "Not found":
+                            price = text
+                        # Check for price per tsubo
+                        elif "坪単価" in text:
+                            match = re.search(r'\d+(\.\d+)?万円', text)
+                            if match:
+                                price_per_tsubo = match.group()
+
+                    # Get the size of the property
+                    try:
+                        size_element = listing.find_element(By.CSS_SELECTOR, "div.fr p:nth-of-type(2)").text
+                        # Remove the prefix and replace m² or ㎡ with sqm
+                        size = size_element.replace("土地／", "").replace("m<sup>2</sup>", "sqm").replace("㎡", "sqm")
+
+                        size = re.sub(r'<[^>]+>', '', size)
+
+                    except NoSuchElementException:
+                        size = "Not Available"
+
+                    # Building and floor coverage ratios
+                    try:
+                        # Find the element containing both ratios
+                        ratios_element = listing.find_element(By.XPATH, ".//div[@class='fr w105 bw']/p[contains(text(), '建ぺい率・容積率')]")
+                        ratios_text = ratios_element.text
+
+                        # Extracting the ratios using split
+                        _, ratios_combined = ratios_text.split("／")
+                        building_coverage_ratio_value, floor_area_ratio_value = ratios_combined.split("　")
+
+                        # Formatting the ratios
+                        building_coverage_ratio = f"{building_coverage_ratio_value}"
+                        floor_area_ratio = f"{floor_area_ratio_value}"
+
+                    except NoSuchElementException:
+                        building_coverage_ratio = "Not Available"
+                        floor_area_ratio = "Not Available"
+                    except ValueError:  # In case the text format is unexpected and split fails
+                        building_coverage_ratio = "Not Available"
+                        floor_area_ratio = "Not Available"
+
+                    transportation = listing.find_element(
+                        By.CSS_SELECTOR, "p.mt5:nth-of-type(2)"
+                    ).text
+
+                    # Get high res image 
+                    try:
+                        image_url = listing.find_element(
+                            By.CSS_SELECTOR, ".fl.w90 img"
+                        ).get_attribute("src")
+
+                        # Use regex to replace &w=NNN&h=NNN with &w=1000&h=1000
+                        modified_image_url = re.sub(r"&w=\d+&h=\d+", "&w=500&h=500", image_url)
+
+                        # Use the modified_image_url as needed
+                        image_url = modified_image_url
+
+                    except NoSuchElementException:
+                        logger.error("Image element not found.")
+                        image_url = None  
+                    except Exception as e:
+                        logger.error(f"Unexpected error when processing image URL: {e}")
+                        image_url = None  
+
+                    property_url = listing.find_element(
+                        By.CSS_SELECTOR, "p a"
                     ).get_attribute("href")
-                    image_url = listing.find_element(
-                        By.CSS_SELECTOR, ".imgWrap img"
-                    ).get_attribute("src")
 
                     listing_details = {
                         "price": price,
+                        "name": property_name,
                         "size": size,
-                        "address": address,
-                        "access": access,
-                        "url": url,
+                        "price_per_tsubo": price_per_tsubo,
+                        "building_coverage_ratio": building_coverage_ratio,
+                        "floor_area_ratio": floor_area_ratio,
+                        "features": property_features,
+                        "transportation": transportation,
+                        "url": property_url,
                         "image_url": image_url,
+                        "html_list_item": listing.get_attribute("outerHTML"),
                     }
 
                     all_listings.append(listing_details)
@@ -478,6 +515,16 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
             self.close_driver()
             logger.info("Driver closed")
 
+
+def signal_handler(sig, frame):
+    logger.info("Signal received: shutting down...")
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
+
 def print_ascii_logo():
     blue_bold = "\x1b[34;1m"
     reset = "\033[0m"
@@ -492,9 +539,10 @@ ooooo   ooooo                                   ooooo   ooooo                   
  888     888 888   888 888   888   888 888    .o 888     888  888   888  888   888  888 . 888    .o  888
 o888o   o888o`Y8bod8P o888o o888o o888o`Y8bod8P'o888o   o888o `V88V"V8P'o888o o888o "888" `Y8bod8P' d888b                                                                                                                                                                                                                                                                                      
     """
-   + reset
+        + reset
     )
     print(ascii_logo, flush=True)
+
 
 def check_notification_settings(app_config: AppConfig):
     yellow = "\033[93m"
@@ -528,12 +576,15 @@ def main():
             logger.error(f"❗ Error processing SUUMOHunter: {e}", exc_info=True)
             hunter.close_driver()
             sleep_time = int(os.getenv("WAIT_SECONDS_BETWEEN_CHECKS", "60"))
-            logger.info(f"Restarting after error. Waiting for {sleep_time} seconds before the next check...")
+            logger.info(
+                f"Restarting after error. Waiting for {sleep_time} seconds before the next check..."
+            )
             time.sleep(sleep_time)
         except KeyboardInterrupt:
             logger.warning("🛑 Home-hunter terminated by user.")
             hunter.close_driver()
             break
+
 
 if __name__ == "__main__":
     main()
