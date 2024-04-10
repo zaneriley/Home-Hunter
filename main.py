@@ -7,7 +7,7 @@ from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 from configparser import SectionProxy
-from typing import Dict, Optional, Union
+from typing import Dict, Union
 from abc import ABC, abstractmethod
 
 import logging
@@ -16,27 +16,35 @@ import configparser
 import requests
 import json
 import time
-import traceback
 
-def setup_logging() -> logging.Logger:
+def setup_logging():
     log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
     numeric_level = getattr(logging, log_level, None)
     if not isinstance(numeric_level, int):
         raise ValueError(f"Invalid log level: {log_level}")
-    logging.basicConfig(level=numeric_level, format='%(asctime)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger(__name__)
-    return logger
+    logging.basicConfig(level=numeric_level, format='%(message)s')
+
+    return logging.getLogger(__name__) 
+
+# This is just to clear out logs from the sites we're connecting to
+class IgnoreBrowserLogsFilter(logging.Filter):
+    def filter(self, record):
+        unwanted_phrases = [
+            "Third-party cookie will be blocked",
+            "Google Maps JavaScript API has been loaded",
+            "google.maps.event.addDomListener() is deprecated",
+            "An iframe which has both allow-scripts and allow-same-origin" 
+        ]
+        return not any(phrase in record.getMessage() for phrase in unwanted_phrases)
+
+logger = setup_logging()
+logger.addFilter(IgnoreBrowserLogsFilter())  # Add the filter
 
 def load_config(config_path: str = "websites.ini") -> configparser.ConfigParser:
     config = configparser.ConfigParser(interpolation=None)
     if not config.read(config_path):
         raise FileNotFoundError(f"Failed to load configuration from {config_path}. Please check the file path and try again.")
     return config
-
-
-class IgnoreBrowserLogsFilter(logging.Filter):
-    def filter(self, record):
-        return "Third-party cookie will be blocked" not in record.getMessage()
 
 
 class AppConfig:
@@ -49,9 +57,8 @@ class AppConfig:
 
 
 class WebDriverBase:
-    def __init__(self, app_config: AppConfig, logger: logging.Logger):
+    def __init__(self, app_config: AppConfig):
         self.app_config = app_config
-        self.logger = logger
         self.driver_path = app_config.webdriver_path
         self.driver = self._init_driver()
 
@@ -352,9 +359,10 @@ class AbstractHunter(ABC):
 
 
 class SUUMOHunter(AbstractHunter, WebDriverBase):
-    def __init__(self):
-        super().__init__(config["SUUMO"])
-        WebDriverBase.__init__(self)
+    def __init__(self, app_config: AppConfig):
+        suumo_config = app_config.config['SUUMO']
+        AbstractHunter.__init__(self, config=suumo_config)
+        WebDriverBase.__init__(self, app_config=app_config)
 
     def check_for_new_listings(self):
         logger.debug(f"Accessing URL: {self.config['target_url']}")
@@ -506,7 +514,7 @@ def main():
     logger.info("Starting home-hunter")
     check_notification_settings(app_config)
 
-    hunter = SUUMOHunter(app_config=app_config, logger=logger)
+    hunter = SUUMOHunter(app_config=app_config)
 
     while True:
         try:
