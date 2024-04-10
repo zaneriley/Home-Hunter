@@ -314,7 +314,7 @@ class AbstractHunter(ABC):
             for listing in self.listings["new_listings"]:
                 logger.info("Preparing message for %s", listing["url"])
                 embed_payload = self.format_listing_message(listing)
-                self.send_notification({"content": "", "embeds": embed_payload})
+                self.send_notification({"content": "", "embeds": [embed_payload]})
         else:
             logger.info(
                 "Preparing summary for %d listings", len(self.listings["new_listings"])
