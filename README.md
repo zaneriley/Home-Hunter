@@ -12,13 +12,13 @@ Home Hunter is a Python-based tool that automates the process of searching for a
   * **Docker:** https://docs.docker.com/get-docker/
   * **Docker Compose:** https://docs.docker.com/compose/install/
   
-  Docker is necessary because it allows us to run the application in a container, which is isolated from the host system and other containers. This means that the application will not interfere with other applications or the host system, and it will be easier to manage and update.
+  Docker makes it easier to set up and run software, which is isolated from the host system and other containers. 
 
 2. **Clone the repository:**
    ```bash
    git clone https://github.com/zaneriley/home-hunter.git
    cd home-hunter
-    ```
+   ```
     Now you need to configure what SUUMO listings you want to monitor, and where to send notifications on Discord.
 
 3. **Add your SUUMO url in `websites.ini`**
