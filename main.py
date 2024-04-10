@@ -220,7 +220,9 @@ class AbstractHunter(ABC):
                 logger.debug("No listings to save.")
 
             # Save updated seen listings back to file
-            pretty_listings = json.dumps(updated_seen_listings, indent=4, ensure_ascii=False)
+            pretty_listings = json.dumps(
+                updated_seen_listings, indent=4, ensure_ascii=False
+            )
             with open(self.seen_listings_file, "w") as file:
                 file.write(pretty_listings)
 
@@ -339,7 +341,9 @@ class AbstractHunter(ABC):
                 logger.info(
                     f"Payload to send notification:\n{json.dumps(embed_payload, indent=4)}"
                 )
-                response = requests.post(self.app_config.notification_url, json=embed_payload)
+                response = requests.post(
+                    self.app_config.notification_url, json=embed_payload
+                )
                 response.raise_for_status()  # Raise an exception if a non-200 status code is returned
                 logger.info("Notification sent successfully.")
             except requests.exceptions.HTTPError as e:
@@ -402,12 +406,19 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
             for listing in listings:
                 try:
                     property_name = listing.find_element(By.CSS_SELECTOR, "p a").text
-                    property_features_elements = listing.find_elements(By.CSS_SELECTOR, "ul.cf li")
-                    property_features = "\n".join(element.text for element in property_features_elements)
+                    property_features_elements = listing.find_elements(
+                        By.CSS_SELECTOR, "ul.cf li"
+                    )
+                    property_features = "\n".join(
+                        element.text for element in property_features_elements
+                    )
 
                     # Price and per_tsubo price
-                    price_elements = listing.find_elements(By.XPATH, ".//div[@class='fr w105 bw']/p[contains(text(), '円')]")
-                    
+                    price_elements = listing.find_elements(
+                        By.XPATH,
+                        ".//div[@class='fr w105 bw']/p[contains(text(), '円')]",
+                    )
+
                     price = "Not found"
                     price_per_tsubo = "Not found"
 
@@ -418,17 +429,23 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
                             price = text
                         # Check for price per tsubo
                         elif "坪単価" in text:
-                            match = re.search(r'\d+(\.\d+)?万円', text)
+                            match = re.search(r"\d+(\.\d+)?万円", text)
                             if match:
                                 price_per_tsubo = match.group()
 
                     # Get the size of the property
                     try:
-                        size_element = listing.find_element(By.CSS_SELECTOR, "div.fr p:nth-of-type(2)").text
+                        size_element = listing.find_element(
+                            By.CSS_SELECTOR, "div.fr p:nth-of-type(2)"
+                        ).text
                         # Remove the prefix and replace m² or ㎡ with sqm
-                        size = size_element.replace("土地／", "").replace("m<sup>2</sup>", "sqm").replace("㎡", "sqm")
+                        size = (
+                            size_element.replace("土地／", "")
+                            .replace("m<sup>2</sup>", "sqm")
+                            .replace("㎡", "sqm")
+                        )
 
-                        size = re.sub(r'<[^>]+>', '', size)
+                        size = re.sub(r"<[^>]+>", "", size)
 
                     except NoSuchElementException:
                         size = "Not Available"
@@ -436,12 +453,18 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
                     # Building and floor coverage ratios
                     try:
                         # Find the element containing both ratios
-                        ratios_element = listing.find_element(By.XPATH, ".//div[@class='fr w105 bw']/p[contains(text(), '建ぺい率・容積率')]")
+                        ratios_element = listing.find_element(
+                            By.XPATH,
+                            ".//div[@class='fr w105 bw']/p[contains(text(), '建ぺい率・容積率')]",
+                        )
                         ratios_text = ratios_element.text
 
                         # Extracting the ratios using split
                         _, ratios_combined = ratios_text.split("／")
-                        building_coverage_ratio_value, floor_area_ratio_value = ratios_combined.split("　")
+                        (
+                            building_coverage_ratio_value,
+                            floor_area_ratio_value,
+                        ) = ratios_combined.split("　")
 
                         # Formatting the ratios
                         building_coverage_ratio = f"{building_coverage_ratio_value}"
@@ -450,7 +473,9 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
                     except NoSuchElementException:
                         building_coverage_ratio = "Not Available"
                         floor_area_ratio = "Not Available"
-                    except ValueError:  # In case the text format is unexpected and split fails
+                    except (
+                        ValueError
+                    ):  # In case the text format is unexpected and split fails
                         building_coverage_ratio = "Not Available"
                         floor_area_ratio = "Not Available"
 
@@ -458,24 +483,26 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
                         By.CSS_SELECTOR, "p.mt5:nth-of-type(2)"
                     ).text
 
-                    # Get high res image 
+                    # Get high res image
                     try:
                         image_url = listing.find_element(
                             By.CSS_SELECTOR, ".fl.w90 img"
                         ).get_attribute("src")
 
                         # Use regex to replace &w=NNN&h=NNN with &w=1000&h=1000
-                        modified_image_url = re.sub(r"&w=\d+&h=\d+", "&w=500&h=500", image_url)
+                        modified_image_url = re.sub(
+                            r"&w=\d+&h=\d+", "&w=500&h=500", image_url
+                        )
 
                         # Use the modified_image_url as needed
                         image_url = modified_image_url
 
                     except NoSuchElementException:
                         logger.error("Image element not found.")
-                        image_url = None  
+                        image_url = None
                     except Exception as e:
                         logger.error(f"Unexpected error when processing image URL: {e}")
-                        image_url = None  
+                        image_url = None
 
                     property_url = listing.find_element(
                         By.CSS_SELECTOR, "p a"
