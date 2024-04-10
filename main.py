@@ -18,37 +18,20 @@ import json
 import time
 import traceback
 
-logger = logging.getLogger(__name__)
+def setup_logging() -> logging.Logger:
+    log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
+    numeric_level = getattr(logging, log_level, None)
+    if not isinstance(numeric_level, int):
+        raise ValueError(f"Invalid log level: {log_level}")
+    logging.basicConfig(level=numeric_level, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+    return logger
 
-log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
-logger.setLevel(log_level)
-
-levels = {
-    "DEBUG": logging.DEBUG,
-    "INFO": logging.INFO,
-    "WARNING": logging.WARNING,
-    "ERROR": logging.ERROR,
-    "CRITICAL": logging.CRITICAL,
-}
-
-enable_notifications: bool = os.getenv("ENABLE_NOTIFICATIONS", "false").lower() in (
-    "true",
-    "1",
-    "t",
-)
-notification_url: Optional[str] = os.getenv("NOTIFICATION_URL")
-webdriver_path: str = os.getenv("WEBDRIVER_PATH", "/usr/bin/chromedriver")
-role_id = os.getenv("DISCORD_ROLE_ID")
-
-config = configparser.ConfigParser(interpolation=None)
-config_path = "websites.ini"
-if config.read(config_path):
-    logger.info(f"Configuration loaded from {config_path}")
-else:
-    logger.error(
-        f"Failed to load configuration from {config_path}. Please check the file path and try again."
-    )
-    exit(1)
+def load_config(config_path: str = "websites.ini") -> configparser.ConfigParser:
+    config = configparser.ConfigParser(interpolation=None)
+    if not config.read(config_path):
+        raise FileNotFoundError(f"Failed to load configuration from {config_path}. Please check the file path and try again.")
+    return config
 
 
 class IgnoreBrowserLogsFilter(logging.Filter):
@@ -56,14 +39,20 @@ class IgnoreBrowserLogsFilter(logging.Filter):
         return "Third-party cookie will be blocked" not in record.getMessage()
 
 
-handler = logging.StreamHandler()
-logger.addHandler(handler)
-logger.addFilter(IgnoreBrowserLogsFilter())
+class AppConfig:
+    def __init__(self):
+        self.enable_notifications = os.getenv("ENABLE_NOTIFICATIONS", "false").lower() in ("true", "1", "t")
+        self.notification_url = os.getenv("NOTIFICATION_URL")
+        self.webdriver_path = os.getenv("WEBDRIVER_PATH", "/usr/bin/chromedriver")
+        self.role_id = os.getenv("DISCORD_ROLE_ID")
+        self.config = load_config()
 
 
 class WebDriverBase:
-    def __init__(self):
-        self.driver_path: str = webdriver_path
+    def __init__(self, app_config: AppConfig, logger: logging.Logger):
+        self.app_config = app_config
+        self.logger = logger
+        self.driver_path = app_config.webdriver_path
         self.driver = self._init_driver()
 
     def _init_driver(self):
@@ -466,14 +455,6 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
                 except NoSuchElementException as e:
                     logger.error(f"Error extracting details for listing: {e}")
 
-            # Open the URL from each listing
-            # Find the table[summary="hyo"]
-            # Look for the text "建ぺい率･容積率" and get the second th+td pair
-            # Find second number
-            # Do original land size * second number / 100
-            # If this above number is larger than 140, it is a good listing
-            
-
             self.process_listings(all_listings)
 
             self.announce_new_listings()
@@ -489,13 +470,9 @@ class SUUMOHunter(AbstractHunter, WebDriverBase):
             self.close_driver()
             logger.info("Driver closed")
 
-
-if __name__ == "__main__":
+def print_ascii_logo():
     blue_bold = "\x1b[34;1m"
     reset = "\033[0m"
-    yellow = "\033[93m"
-    green = "\033[92m"
-    red = "\033[91m"
     ascii_logo = (
         blue_bold
         + """
@@ -507,26 +484,29 @@ ooooo   ooooo                                   ooooo   ooooo                   
  888     888 888   888 888   888   888 888    .o 888     888  888   888  888   888  888 . 888    .o  888
 o888o   o888o`Y8bod8P o888o o888o o888o`Y8bod8P'o888o   o888o `V88V"V8P'o888o o888o "888" `Y8bod8P' d888b                                                                                                                                                                                                                                                                                      
     """
-        + reset
+   + reset
     )
     print(ascii_logo, flush=True)
-    logger.info("Starting home-hunter")
 
-    enable_notifications = os.getenv("ENABLE_NOTIFICATIONS", "false").lower() in (
-        "true",
-        "1",
-        "t",
-    )
-    notification_url = os.getenv("NOTIFICATION_URL")
-    if not enable_notifications or not notification_url:
+def check_notification_settings(app_config: AppConfig):
+    yellow = "\033[93m"
+    reset = "\033[0m"
+    if not app_config.enable_notifications or not app_config.notification_url:
         alert_message = f"""{yellow}
-            ⚠️  Attention: Notifications are disabled or notification URL is not provided. ⚠️
-                                   Notifications will NOT be sent.                        
-                        {reset}"""
+⚠️  Attention: Notifications are disabled or notification URL is not provided. ⚠️
+                               Notifications will NOT be sent.                        
+                {reset}"""
         print(alert_message, flush=True)
 
 
-    hunter = SUUMOHunter()
+def main():
+    logger = setup_logging()
+    app_config = AppConfig()
+    print_ascii_logo()
+    logger.info("Starting home-hunter")
+    check_notification_settings(app_config)
+
+    hunter = SUUMOHunter(app_config=app_config, logger=logger)
 
     while True:
         try:
@@ -536,16 +516,16 @@ o888o   o888o`Y8bod8P o888o o888o o888o`Y8bod8P'o888o   o888o `V88V"V8P'o888o o8
             sleep_time = int(os.getenv("WAIT_SECONDS_BETWEEN_CHECKS", "60"))
             logger.info(f"Waiting for {sleep_time} seconds before the next check...")
             time.sleep(sleep_time)
-
         except Exception as e:
             logger.error(f"❗ Error processing SUUMOHunter: {e}", exc_info=True)
             hunter.close_driver()
             sleep_time = int(os.getenv("WAIT_SECONDS_BETWEEN_CHECKS", "60"))
             logger.info(f"Restarting after error. Waiting for {sleep_time} seconds before the next check...")
             time.sleep(sleep_time)
-            # No need to restart the driver here, it will be restarted at the beginning of the next loop iteration
-
         except KeyboardInterrupt:
             logger.warning("🛑 Home-hunter terminated by user.")
             hunter.close_driver()
-            break  # Exit the loop gracefully
+            break
+
+if __name__ == "__main__":
+    main()
